@@ -15,11 +15,11 @@
 
 
 // ///////////////////////////////////////////////////////////////////////
-// topic: /livox/color_lidar
+// topic: /test_lidar
 // frame: sensor_frame
 // multi-topic asynchronized
 // ///////////////////////////////////////////////////////////////////////
-
+using namespace std;
 
 
 static bool IS_IMAGE_CORRECTION = true;
@@ -28,47 +28,29 @@ std::mutex mut_img;
 std::mutex mut_pc;
 
 
-//livox点云消息包含xyz和intensity
+//포인트클라우드 메시지 포함 xyz和intensity
 pcl::PointCloud<pcl::PointXYZI>::Ptr raw_pcl_ptr(new pcl::PointCloud<pcl::PointXYZI>); 
-pcl::PointCloud<pcl::PointXYZI>::Ptr linshi_raw_pcl_ptr(new pcl::PointCloud<pcl::PointXYZI>); 
-
-// pcl::PointCloud<pcl::PointXYZI> linshi_raw_pcl_ptr; 
+pcl::PointCloud<pcl::PointXYZI>::Ptr copy_raw_pcl_ptr(new pcl::PointCloud<pcl::PointXYZI>); 
 
 cv::Mat image_color;
-cv::Mat linshi_image_color;
+cv::Mat copy_image_color;
 
-// 发布判断
+// 이미지, 라이다 들어오는지 확인
 bool is_rec_image = false;
-bool is_rec_lidar = false;
-
-// /* 自定义的PointXYZRGBIL（pcl没有PointXYZRGBIL、PointXYZRGBI结构体）*/
-// struct PointXYZRGBIL
-// {
-// 	PCL_ADD_POINT4D;
-// 	PCL_ADD_RGB;
-// 	uint32_t label;
-// 	PCL_ADD_INTENSITY;
-// 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-// } EIGEN_ALIGN16;
-// POINT_CLOUD_REGISTER_POINT_STRUCT(
-// 	PointXYZRGBIL,
-// 	(float, x, x)(float, y, y)(float, z, z)(float, rgb, rgb)(uint32_t, label, label)(float, intensity, intensity))
-
-
-// typedef PointXYZRGBIL PointType;
+bool is_rec_LiDAR = false;
 
 typedef pcl::PointXYZRGB PointType;
 
 
-class ImageLivoxFusion
+class ImageLiDARFusion
 {
 public:
   ros::NodeHandle nh;
   image_transport::ImageTransport it;
   image_transport::Subscriber image_sub;
-  ros::Subscriber livox_sub;
+  ros::Subscriber LiDAR_sub;
   image_transport::Publisher image_pub;
-  ros::Publisher livox_pub;
+  ros::Publisher LiDAR_pub;
   cv_bridge::CvImagePtr cv_ptr;
   sensor_msgs::PointCloud out_pointcloud;
   sensor_msgs::PointCloud2 colored_msg; 
@@ -84,68 +66,70 @@ public:
   int img_width;
 
 public:
-  ImageLivoxFusion():it(nh)
+  ImageLiDARFusion():it(nh)
   {
     ROS_INFO("------------ intialize ----------\n");
     this->set_param();
-    // ////////////////////////////////////////////////////////////////////////////////////////////
-    // 多消息异步回调
-    // ////////////////////////////////////////////////////////////////////////////////////////////
 
-    image_sub = it.subscribe("/hik_cam_node/hik_camera", 100, &ImageLivoxFusion::imageCallback, this);
-    // livox_sub = nh.subscribe("/livox/lidar", 100, &ImageLivoxFusion::livoxCallback, this);
-    livox_sub = nh.subscribe("/livox_repub", 100, &ImageLivoxFusion::livoxCallback, this);
+    // image_sub = it.subscribe("/camera/stopline/image_raw", 100, &ImageLiDARFusion::imageCallback, this);
+    image_sub = it.subscribe("/camera_fusion_test", 100, &ImageLiDARFusion::imageCallback, this);
+    // LiDAR_sub = nh.subscribe("/livox/lidar", 100, &ImageLiDARFusion::LiDARCallback, this);
+    LiDAR_sub = nh.subscribe("/velodyne_points", 100, &ImageLiDARFusion::LiDARCallback, this);
    
-    image_pub = it.advertise("/hik_cam_node/undist_camera", 10);    
-    livox_pub = nh.advertise<sensor_msgs::PointCloud2>("livox/color_lidar", 10);
+    image_pub = it.advertise("/test_camera", 10);    
+    LiDAR_pub = nh.advertise<sensor_msgs::PointCloud2>("test_LiDAR", 10);
     int ret1 = pthread_create(&tids1_, NULL,  publish_thread, this); 
 
     ROS_INFO("START LISTENING\n");
   };
 
-  ~ImageLivoxFusion()
+  ~ImageLiDARFusion()
   {
   };
 
   void set_param();
-  void livoxCallback(const sensor_msgs::PointCloud2ConstPtr & msg);
+  void LiDARCallback(const sensor_msgs::PointCloud2ConstPtr & msg);
   void imageCallback(const sensor_msgs::ImageConstPtr& msg);
   static void * publish_thread(void *  this_sub);
 };
 
-void * ImageLivoxFusion::publish_thread(void * args)
+void * ImageLiDARFusion::publish_thread(void * args)
 {
-  ImageLivoxFusion * this_sub = (ImageLivoxFusion *) args; //**point3**：将void*入参转为类对象ImageLivoxFusion* 指针
+  ImageLiDARFusion * this_sub = (ImageLiDARFusion *) args; //**point3**：입력된 void*매개변수를 클래스 객체(ImageLiDARFusion*)로 반환 
   ros::Rate loop_rate(10);
   while (ros::ok())
   {
   
-    if (is_rec_image && is_rec_lidar)
+    if (is_rec_image && is_rec_LiDAR)
     {
       mut_pc.lock();
-      pcl::copyPointCloud (*raw_pcl_ptr, *linshi_raw_pcl_ptr);
+      pcl::copyPointCloud (*raw_pcl_ptr, *copy_raw_pcl_ptr);
       mut_pc.unlock();
 
       mut_img.lock();
-      linshi_image_color = image_color.clone();
+      copy_image_color = image_color.clone();
       mut_img.unlock();
 
       pcl::PointCloud<PointType>::Ptr pc_xyzrgb(new pcl::PointCloud<PointType>);
-      const int size = linshi_raw_pcl_ptr->points.size();
+      const int size = copy_raw_pcl_ptr->points.size(); 
+      
+      cout<<"point cloud size: "<<size<< endl;;
+
       for (int i = 0; i < size; i++)
       {
         // project get the photo coordinate
         // pcl::PointXYZRGB pointRGB;
         PointType pointRGB;
 
-        pointRGB.x = linshi_raw_pcl_ptr->points[i].x;
-        pointRGB.y = linshi_raw_pcl_ptr->points[i].y;
-        pointRGB.z = linshi_raw_pcl_ptr->points[i].z;
+        pointRGB.x = copy_raw_pcl_ptr->points[i].x;
+        pointRGB.y = copy_raw_pcl_ptr->points[i].y;
+        pointRGB.z = copy_raw_pcl_ptr->points[i].z;
         double a_[4] = { pointRGB.x, pointRGB.y, pointRGB.z, 1.0 };
         cv::Mat pos(4, 1, CV_64F, a_);
         cv::Mat newpos(this_sub->transform_matrix * pos);
         float x = (float)(newpos.at<double>(0, 0) / newpos.at<double>(2, 0));
         float y = (float)(newpos.at<double>(1, 0) / newpos.at<double>(2, 0));
+        // cout << "x: "<<x <<"  / y: "<<y<<endl;
 
         // Trims viewport according to image size
         if (pointRGB.x >= 0)
@@ -155,11 +139,12 @@ void * ImageLivoxFusion::publish_thread(void * args)
             //  imread BGR（BITMAP）
             int row = int(y);
             int column = int(x);
-            pointRGB.r = linshi_image_color.at<cv::Vec3b>(row, column)[2];
-            pointRGB.g = linshi_image_color.at<cv::Vec3b>(row, column)[1];
-            pointRGB.b = linshi_image_color.at<cv::Vec3b>(row, column)[0];
+            cout << "row: "<<row <<"  / column: "<<column<<endl;
+            pointRGB.r = copy_image_color.at<cv::Vec3b>(row, column)[2];
+            pointRGB.g = copy_image_color.at<cv::Vec3b>(row, column)[1];
+            pointRGB.b = copy_image_color.at<cv::Vec3b>(row, column)[0];
            
-            // pointRGB.intensity = linshi_raw_pcl_ptr->points[i].intensity; //继承之前点云的intensity
+            // pointRGB.intensity = copy_raw_pcl_ptr->points[i].intensity; //이전 포인트 클라우드 상속 : intensity
             pc_xyzrgb->push_back(pointRGB);
           }
         }
@@ -169,19 +154,19 @@ void * ImageLivoxFusion::publish_thread(void * args)
       pcl::toROSMsg(*pc_xyzrgb,  this_sub->colored_msg);  // 将点云转化为ROS消息发布
       this_sub->colored_msg.header.frame_id = "sensor_frame";
       this_sub->colored_msg.header.stamp = ros::Time::now(); 
-      this_sub->livox_pub.publish(this_sub->colored_msg); 
+      this_sub->LiDAR_pub.publish(this_sub->colored_msg); 
       loop_rate.sleep();
     }
   }
 }
 
 
-void ImageLivoxFusion::set_param() 
+void ImageLiDARFusion::set_param() 
 {
   // extrinsic matrix parameters
   XmlRpc::XmlRpcValue param_list;
   std::vector<double> Extrin_matrix;
-  if(!nh.getParam("/color_pc_node/CameraExtrinsicMat/data", param_list))
+  if(!nh.getParam("/fusion_LiDAR/CameraExtrinsicMat/data", param_list))
       ROS_ERROR("Failed to get extrinsic parameter.");
   ROS_INFO("\n get extrinsic parameter:");
   for (size_t i = 0; i < param_list.size(); ++i) 
@@ -195,8 +180,8 @@ void ImageLivoxFusion::set_param()
   }
   // Intrinsic matrix parameters
   std::vector<double> Intrinsic;
-  if(!nh.getParam("/color_pc_node/CameraMat/data", param_list))
-      ROS_ERROR("Failed to get extrinsic parameter.");
+  if(!nh.getParam("/fusion_LiDAR/CameraMat/data", param_list))
+      ROS_ERROR("Failed to get intrinsic parameter.");
   ROS_INFO("\n get intrinsic parameter:");
   for (size_t i = 0; i < param_list.size(); ++i) 
   {
@@ -211,8 +196,8 @@ void ImageLivoxFusion::set_param()
 
   // 5 distortion parameters
   std::vector<double> dist;
-  if(!nh.getParam("/color_pc_node/DistCoeff/data", param_list))
-      ROS_ERROR("Failed to get extrinsic parameter.");
+  if(!nh.getParam("/fusion_LiDAR/DistCoeff/data", param_list))
+      ROS_ERROR("Failed to get distortion parameter.");
   ROS_INFO("\n get distortion parameter:");
   for (size_t i = 0; i < param_list.size(); ++i) 
   {
@@ -226,7 +211,7 @@ void ImageLivoxFusion::set_param()
   
   // img size
   std::vector<int> img_size;
-  if(!nh.getParam("/color_pc_node/ImageSize", param_list))
+  if(!nh.getParam("/fusion_LiDAR/ImageSize", param_list))
       ROS_ERROR("Failed to get extrinsic parameter.");
   ROS_INFO("\n get image size:");
   for (size_t i = 0; i < param_list.size(); ++i) 
@@ -260,16 +245,16 @@ void ImageLivoxFusion::set_param()
 
 
 
-void ImageLivoxFusion::livoxCallback(const sensor_msgs::PointCloud2ConstPtr & msg)
+void ImageLiDARFusion::LiDARCallback(const sensor_msgs::PointCloud2ConstPtr & msg)
 {
   mut_pc.lock();
   pcl::fromROSMsg(*msg, *raw_pcl_ptr);	
   mut_pc.unlock();
-  is_rec_lidar = true;
+  is_rec_LiDAR = true;
 }
 
 
-void ImageLivoxFusion::imageCallback(const sensor_msgs::ImageConstPtr& msg)
+void ImageLiDARFusion::imageCallback(const sensor_msgs::ImageConstPtr& msg)
 {
   
   try
@@ -313,8 +298,8 @@ int main(int argc, char** argv)
   
   if (strcmp(argv[1], "true") == 0){IS_IMAGE_CORRECTION = true; ROS_INFO("correct image");}
   else {IS_IMAGE_CORRECTION = false;ROS_INFO("don't correct image");}
-  ImageLivoxFusion ic;
-  ros::MultiThreadedSpinner spinner(4);  //节点多线程
+  ImageLiDARFusion ic;
+  ros::MultiThreadedSpinner spinner(4);  //노드 멀티쓰레딩
   spinner.spin();   
   // ros::spin();
   return 0;

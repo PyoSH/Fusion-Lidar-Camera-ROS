@@ -1,0 +1,7 @@
+<launch>
+	<node pkg="fusion_test" type="fusion_LiDAR" name="fusion_LiDAR" args="true" output="screen">
+		<rosparam file="$(find fusion_test)/config/param_test.yaml" command="load"/>	
+                <remap from="/LiDAR_repub" to="/velodyne_points" />
+	</node>
+	<node pkg="rviz" type="rviz" name="rviz_fusion" args="-d $(find fusion_test)/config/show.rviz" required="true" />
+</launch>
